@@ -1,0 +1,25 @@
+ls -la
+pwd
+whoami
+date
+uptime
+hostname
+df -h
+free -m
+ifconfig
+netstat -tuln
+iptables -L
+ps aux
+top -b -n1
+cat /etc/os-release
+uname -a
+curl ifconfig.me
+traceroute google.com
+ping -c 4 8.8.8.8
+cat /etc/passwd
+cat /etc/shadow
+history
+who
+last
+service --status-all
+systemctl list-units --type=service
