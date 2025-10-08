@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Server Control Dashboard</title>
+    <style>
+        body {
+            background-color: #0c0c0c;
+            color: #d0d0d0;
+            font-family: "Fira Code", monospace;
+            font-size: 14px;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            height: 95vh;
+        }
+
+        h1 {
+            color: #00ff66;
+            font-size: 22px;
+            margin-bottom: 15px;
+        }
+
+        #top-bar {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+            gap: 10px;
+        }
+
+        #connectionSelect {
+            background: #111;
+            color: #00ff66;
+            border: 1px solid #333;
+            border-radius: 6px;
+            padding: 5px 10px;
+            font-family: "Fira Code", monospace;
+            font-size: 14px;
+            cursor: pointer;
+        }
+
+        #options-panel {
+            background: #111;
+            border: 1px solid #333;
+            border-radius: 6px;
+            padding: 15px;
+            margin-bottom: 20px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.5) inset;
+        }
+
+        #options-panel h3 {
+            margin-top: 0;
+            color: #00ff66;
+            font-size: 16px;
+        }
+
+        .option-group {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 10px;
+        }
+
+        label {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        input[type="checkbox"] {
+            accent-color: #00ff66;
+            cursor: pointer;
+        }
+
+        #connection-details {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+
+        #connection-details input {
+            background: #0e0e0e;
+            color: #00ff66;
+            border: 1px solid #333;
+            border-radius: 4px;
+            padding: 6px 8px;
+            font-family: "Fira Code", monospace;
+            font-size: 13px;
+        }
+
+        #saveBtn,
+        #terminalBtn {
+            background: #00ff66;
+            color: #0c0c0c;
+            border: none;
+            border-radius: 6px;
+            padding: 8px 14px;
+            font-family: "Fira Code", monospace;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background 0.2s;
+        }
+
+        #saveBtn:hover,
+        #terminalBtn:hover {
+            background: #00cc55;
+        }
+
+        #status {
+            margin-top: 10px;
+            color: #00ff66;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Server Control Dashboard</h1>
+
+
+
+    <div id="options-panel">
+        <h3>Server Options</h3>
+        <div class="option-group">
+            <label><input type="checkbox" id="optLogging"> Enable Logging</label>
+            <label><input type="checkbox" id="optMonitoring"> Enable Monitoring</label>
+            <label><input type="checkbox" id="optDebug"> Enable Debug Mode</label>
+        </div>
+        <br>
+        <h3>Connection Details</h3>
+        <div id="connection-details">
+            <div id="top-bar">
+                <label for="connectionSelect">Connection:</label>
+                <select id="connectionSelect">
+                    <option value="">-- Select Connection --</option>
+                </select>
+                <button id="terminalBtn">Go to Live Terminal</button>
+            </div>
+            <input type="text" id="connName" placeholder="Connection Nickname">
+            <input type="text" id="connIP" placeholder="IP" disabled>
+            <input type="text" id="connPort" placeholder="Port" disabled>
+            <input type="text" id="connHostname" placeholder="Hostname" disabled>
+            <input type="text" id="connOS" placeholder="OS" disabled>
+            <input type="text" id="connUser" placeholder="Connection User" disabled>
+            <button id="saveBtn">Save Changes</button>
+        </div>
+    </div>
+
+    <div id="status"></div>
+
+    <script>
+        const select = document.getElementById('connectionSelect');
+        const connName = document.getElementById('connName');
+        const connIP = document.getElementById('connIP');
+        const connPort = document.getElementById('connPort');
+        const connHostname = document.getElementById('connHostname');
+        const connOS = document.getElementById('connOS');
+        const connUser = document.getElementById('connUser');
+        const saveBtn = document.getElementById('saveBtn');
+        const status = document.getElementById('status');
+        const terminalBtn = document.getElementById('terminalBtn');
+
+        const optLogging = document.getElementById('optLogging');
+        const optMonitoring = document.getElementById('optMonitoring');
+        const optDebug = document.getElementById('optDebug');
+
+        let currentConn = null;
+
+        // Fetch available connections
+        async function loadConnections() {
+            try {
+                const res = await fetch('/connections');
+                const connections = await res.json();
+                connections.forEach(conn => {
+                    const option = document.createElement('option');
+                    option.value = conn.ip + ':' + conn.port;
+                    option.textContent = conn.nickname ? `${conn.nickname} (${conn.ip}:${conn.port})` : `${conn.ip}:${conn.port}`;
+                    select.appendChild(option);
+                });
+            } catch (err) {
+                console.error("Failed to load connections:", err);
+            }
+        }
+
+        loadConnections();
+
+        // When connection is selected
+        select.addEventListener('change', async () => {
+            const value = select.value;
+            if (!value) return;
+
+            const [ip, port] = value.split(':');
+            currentConn = { ip, port };
+
+            // Fetch connection details
+            try {
+                const res = await fetch(`/connection-details?ip=${ip}&port=${port}`);
+                const data = await res.json();
+                connName.value = data.nickname || '';
+                connIP.value = ip;
+                connPort.value = port;
+                connHostname.value = data.hostname || '';
+                connOS.value = data.os || '';
+                connUser.value = data.user || '';
+                optLogging.checked = !!data.logging;
+                optMonitoring.checked = !!data.monitoring;
+                optDebug.checked = !!data.debug;
+                status.textContent = `Loaded ${ip}:${port}`;
+                status.style.color = "#00ff66";
+            } catch (e) {
+                connName.value = '';
+                connIP.value = ip;
+                connPort.value = port;
+                status.textContent = "Could not fetch connection details.";
+                status.style.color = "#ff5555";
+                console.error("Error fetching connection details:", e);
+            }
+        });
+
+        // Save connection changes
+        saveBtn.addEventListener('click', async () => {
+            if (!currentConn) return;
+            const body = {
+                ip: currentConn.ip,
+                port: currentConn.port,
+                nickname: connName.value
+            };
+
+            try {
+                const res = await fetch('/update-connection', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                if (res.ok) {
+                    status.textContent = "Connection settings updated successfully.";
+                    status.style.color = "#00ff66";
+                } else {
+                    status.textContent = "Failed to update settings.";
+                    status.style.color = "#ff5555";
+                }
+            } catch (err) {
+                status.textContent = "Error updating connection.";
+                status.style.color = "#ff5555";
+            }
+        });
+
+        // Go to live terminal
+        terminalBtn.addEventListener('click', () => {
+            if (!currentConn) {
+                alert("Please select a connection first.");
+                return;
+            }
+            const url = `/terminal?ip=${encodeURIComponent(currentConn.ip)}&port=${encodeURIComponent(currentConn.port)}`;
+            window.location.href = url;
+        });
+    </script>
+</body>
+
+</html>
