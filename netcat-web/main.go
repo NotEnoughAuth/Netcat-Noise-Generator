@@ -16,13 +16,36 @@ var upgrader = websocket.Upgrader{
 
 func main() {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("Netcat Noise Generator Webserver"))
+		tmpl := `
+		<!DOCTYPE html>
+		<html>
+		<head>
+			<title>Netcat Noise Generator Webserver</title>
+		</head>
+		<body>
+			<h1>Netcat Noise Generator Webserver</h1>
+			<p>Welcome to the Netcat Noise Generator!</p>
+			<button onclick="connectWS()">Connect to WebSocket</button>
+			<pre id="output"></pre>
+			<script>
+				function connectWS() {
+					const ws = new WebSocket("ws://localhost:8080/ws/tail");
+					ws.onmessage = function(event) {
+						document.getElementById("output").textContent += event.data;
+					};
+				}
+			</script>
+		</body>
+		</html>
+		`
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte(tmpl))
 	})
 
 	http.HandleFunc("/ws/tail", tailWebSocketHandler)
 
-	log.Println("Server started at :8080")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	log.Println("Server started at :8000")
+	log.Fatal(http.ListenAndServe(":8000", nil))
 }
 
 func tailWebSocketHandler(w http.ResponseWriter, r *http.Request) {
