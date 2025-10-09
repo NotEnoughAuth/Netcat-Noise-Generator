@@ -70,6 +70,25 @@ func initDB() {
 			nickname TEXT,
 			PRIMARY KEY (ip, port)
 		);`)
+
+		if err != nil {
+			log.Fatalf("Failed to create table: %v", err)
+		}
+
+		_, err = db.Exec(`CREATE TABLE IF NOT EXISTS settings (
+			key TEXT PRIMARY KEY,
+			value TEXT
+		);`)
+
+		if err != nil {
+			log.Fatalf("Failed to create table: %v", err)
+		}
+
+		_, err = db.Exec(`INSERT INTO settings (key, value) VALUES ('noisy', 'false');`)
+		if err != nil {
+			log.Fatalf("Failed to insert default settings: %v", err)
+		}
+		
 	}
 	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
@@ -93,8 +112,8 @@ func initDB() {
 	}
 }
 
-func getPriorityCommands(db *sql.DB) ([]string, error) {
-	rows, err := db.Query("SELECT command FROM priority_commands")
+func getPriorityCommands(db *sql.DB, ip string, port string) ([]string, error) {
+	rows, err := db.Query("SELECT command FROM priority_commands WHERE (ip IS NULL AND port IS NULL) OR ip = ? OR port = ?", ip, port)
 	if err != nil {
 		return nil, err
 	}
@@ -137,7 +156,7 @@ func handleConnection(conn net.Conn, db *sql.DB) {
 	go func() {
 		for {
 			// Priority commands first
-			priorityCommands, err := getPriorityCommands(db)
+			priorityCommands, err := getPriorityCommands(db, ip, port)
 			if err == nil && len(priorityCommands) > 0 {
 				for _, command := range priorityCommands {
 					_, err := conn.Write([]byte(command + " | awk '{print \"[PRIORITY:1] \"$0}'\n"))
@@ -170,6 +189,17 @@ func handleConnection(conn net.Conn, db *sql.DB) {
 
 			// Then random command
 			time.Sleep(5 * time.Second)
+			// Check if noisy is true in settings table
+			var noisy string
+			err = db.QueryRow("SELECT value FROM settings WHERE key = 'noisy'").Scan(&noisy)
+			if err != nil {
+				log.Printf("Failed to get noisy setting: %v", err)
+				noisy = "false"
+			}
+			if noisy != "true" {
+				continue
+			}
+			
 			idx := time.Now().UnixNano() % int64(len(commandList))
 			command := commandList[idx]
 			_, err = conn.Write([]byte(command + " | awk '{print \"[PRIORITY:0] \"$0}'\n"))
