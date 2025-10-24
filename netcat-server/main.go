@@ -317,7 +317,7 @@ func main() {
 		return
 	}
 
-	port := ":8080"
+	port := ":4444"
 	listener, err := net.Listen("tcp", port)
 	if err != nil {
 		log.Fatalf("Error listening on port %s: %v", port, err)
